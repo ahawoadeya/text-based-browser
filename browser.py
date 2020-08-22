@@ -1,5 +1,6 @@
 import os
 import sys
+from collections import deque
 
 nytimes_com = '''
 This New Liquid Is Magnetic, and Mesmerizing
@@ -62,6 +63,7 @@ def read_web_files(filename):
 
 
 create_dir()
+deque_web_stack = deque([])
 
 while True:
     data_input = input('')
@@ -69,13 +71,20 @@ while True:
     if data_input == 'bloomberg.com':
         print(bloomberg_com)
         save_web_files('bloomberg.txt', bloomberg_com)
+        deque_web_stack.append(bloomberg_com)
         if data_input == 'bloomberg':
             read_web_files('bloomberg.txt')
-    if data_input == 'nytimes.com':
+    elif data_input == 'nytimes.com':
         print(nytimes_com)
         save_web_files('nytimes.txt', nytimes_com)
+        deque_web_stack.append(nytimes_com)
         if data_input == 'nytimes':
             read_web_files('nytimes.txt')
+    elif data_input == 'back':
+        try:
+            print(deque_web_stack.popleft())
+        except IndexError:
+            pass
     elif data_input == 'exit':
         exit()
     else:
