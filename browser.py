@@ -1,26 +1,65 @@
-import os
-import sys
-from collections import deque
+from sys import argv
+from os import mkdir
+from re import search,compile,match
+from pathlib import Path
+from operator import attrgetter
+import requests
+from bs4 import BeautifulSoup,NavigableString
+import  colorama
+
+"""
+start application :  python browser.py [directory: required]  
+         directory folder where pages are saved
+class Browser  
+    start launch cli 
+      cli command : 
+           exit
+          [link]  if link valid url load print and save the page 
+    
+class Pages
+    get and save the page
+    method:
+        get 
+        
+class History
+    save current and previous page
+    
+    method:
+        update_current
+        back
+class Parser
+    transform html string, return a string without html tags
+    constructor:
+        Parser(html_string: string)
+    method:
+        to_string
+        
+class Renderer
+    configure use of colorama 
+    class use by Browser to render data
+    
+"""
+
 
 nytimes_com = '''
 This New Liquid Is Magnetic, and Mesmerizing
-
+ 
 Scientists have created “soft” magnets that can flow 
 and change shape, and that could be a boon to medicine 
 and robotics. (Source: New York Times)
-
-
+ 
+ 
 Most Wikipedia Profiles Are of Men. This Scientist Is Changing That.
-
+ 
 Jessica Wade has added nearly 700 Wikipedia biographies for
  important female and minority scientists in less than two 
  years.
-
+ 
 '''
 
 bloomberg_com = '''
 The Space Race: From Apollo 11 to Elon Musk
-
+ 
 It's 50 years since the world was gripped by historic images
  of Apollo 11, and Neil Armstrong -- the first man to walk 
  on the moon. It was the height of the Cold War, and the charts
@@ -28,64 +67,204 @@ It's 50 years since the world was gripped by historic images
  Bad Moon Rising. The world is a very different place than 
  it was 5 decades ago. But how has the space race changed since
  the summer of '69? (Source: Bloomberg)
-
-
+ 
+ 
 Twitter CEO Jack Dorsey Gives Talk at Apple Headquarters
-
+ 
 Twitter and Square Chief Executive Officer Jack Dorsey 
  addressed Apple Inc. employees at the iPhone maker’s headquarters
  Tuesday, a signal of the strong ties between the Silicon Valley giants.
 '''
 
-# write your code here
-args = sys.argv
-tb_tabs = args[1]
+class InvalidPageException(Exception):
+    pass
+
+class Parser:
+    def __init__(self,html_string):
+        self.soup=BeautifulSoup(html_string,"html.parser")
 
 
-def create_dir():
-    if tb_tabs:
-        try:
-            os.mkdir(tb_tabs)
-        except FileExistsError:
-            pass
+    def __isblock(self,tag):
+        return tag.name in ["li","p","ul","ol"] or tag.name.startswith("h")
+
+    def __is_valid_tag(self,tag):
+        """
+        return true if tag is not empty and not content of a script tag
+        """
+        not_empty = not (match(r"\s+",tag.string) or tag.string == "\n")
+        return not tag.parent.name in ["script"] and not_empty
+
+    def is_anchor(self,tag):
+        return tag.name == "a"
+    def __parser(self,root):
+        """
+        traverse the tree
+        """
+        response=""
+        for tag in root.contents:
+            if isinstance(tag,NavigableString):
+                if self.__is_valid_tag(tag):
+                    response += tag.string
+
+            elif self.__isblock(tag):
+                response += "\n" + self.__parser(tag)
+            elif self.is_anchor(tag):
+                response += colorama.Fore.BLUE +  self.__parser(tag) +colorama.Style.RESET_ALL
+            else:
+                response += self.__parser(tag)
+
+        return response
 
 
-def save_web_files(filename, content):
-    parent_dir = '/home/derts/PycharmProjects/Text-Based Browser/Text-Based Browser/task/tb_tabs'
-    with open(os.path.join(parent_dir, filename), 'w') as open_file:
-        open_file.write(content)
+    def to_string(self):
+        """
+        return html without tag
+        """
+        return self.__parser(self.soup.body)
 
 
-def read_web_files(filename):
-    parent_dir = '/home/derts/PycharmProjects/Text-Based Browser/Text-Based Browser/task/tb_tabs'
-    with open(os.path.join(parent_dir, filename), 'r') as open_file:
-        print(open_file.read())
+class History:
+    def __init__(self):
+        self.history=[]
+        self.current=""
+
+    def update_current(self,new_item):
+        if self.current:
+            self.history.append(self.current)
+        self.current=new_item
+
+    def back(self):
+        self.current= self.history.pop()
+        return self.current
 
 
-create_dir()
-deque_web_stack = deque([])
+class Pages:
+    url_pattern=r"https?://[^.]+\.[^.]+\.[^.](/.*)?"
+    available=["bloomberg","nytimes"]
+    def __init__(self,path):
+        self.path=path
 
-while True:
-    data_input = input('')
+    @staticmethod
+    def is_valid_url(path):
+        # return search(Pages.url_pattern,path)
+        return not path.find(".") == -1
 
-    if data_input == 'bloomberg.com':
-        print(bloomberg_com)
-        save_web_files('bloomberg.txt', bloomberg_com)
-        deque_web_stack.append(bloomberg_com)
-        if data_input == 'bloomberg':
-            read_web_files('bloomberg.txt')
-    elif data_input == 'nytimes.com':
-        print(nytimes_com)
-        save_web_files('nytimes.txt', nytimes_com)
-        deque_web_stack.append(nytimes_com)
-        if data_input == 'nytimes':
-            read_web_files('nytimes.txt')
-    elif data_input == 'back':
-        try:
-            print(deque_web_stack.popleft())
-        except IndexError:
-            pass
-    elif data_input == 'exit':
-        exit()
-    else:
-        print('Error: Incorrect URL')
+    @staticmethod
+    def  name_from_url(url):
+        """
+        extract name from url
+        """
+        id = url.find(".")
+        return url[:id]
+
+    def available(self):
+        """
+        available pages are save in folder './path'
+        return list of available page
+        """
+        folder=Path(self.path)
+        return list(map(attrgetter("name"), folder.iterdir()))
+
+    def get(self,page):
+         """
+            return a a string or error
+         """
+         if self.is_available(page):
+             name_file= f"{self.path}/{page}"
+             with open(name_file,"r") as file:
+                 data=file.read()
+                 return data,page
+
+         elif not Pages.is_valid_url(page):
+                raise InvalidPageException()
+         else:
+             name_page=Pages.name_from_url(page)
+             data= self.request_page(page)
+             if   data=="error":
+                 raise InvalidPageException()
+             name_file= f"{self.path}/{name_page}"
+             with open(name_file,"w") as file:
+                    parser=Parser(data)
+                    data_string=parser.to_string()
+                    file.write(data_string)
+                    return data_string,name_page
+
+    
+    def request_page(self,page):
+        """
+        get page from an url or  by name
+        for url append https:// if prefix is not at the begining
+        """
+
+        # data=""
+        # if page == "bloomberg":
+        #      data = bloomberg_com
+        # elif page == "nytimes":
+        #      data = nytimes_com
+        #
+        # else:
+        if not page.startswith("https://"):
+                page = "https://" + page
+        response=requests.get(page)
+        if response.status_code == 200:
+                data= response.content
+        else:
+                data= "error"
+        return data
+
+    def is_available(self,page):
+        return page in self.available()
+
+
+class Renderer:
+    """
+    configure use module colorama
+    """
+    def __enter__(self):
+        colorama.init()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        colorama.deinit()
+
+    def print(self,data):
+        print(data)
+
+
+
+class Browser:
+    """
+    method start : launch the brower and wait command
+        exit quit browser
+        back show previous page
+        to get a page type url with pattern aaaa.aaaa
+    """
+    def __init__(self,directory=""):
+        self.pages=Pages(directory)
+        self.history=History()
+
+    def start(self):
+        with Renderer() as render:
+            while True:
+                choice=input()
+                if choice=="exit":
+                    break
+                elif choice=="back":
+                    choice=self.history.back()
+                try:
+                    data,name=self.pages.get(choice)
+                    self.history.update_current(name)
+                    render.print(data)
+                except InvalidPageException :
+                    print("error")
+
+
+
+if __name__=="__main__":
+
+    path=argv[1]
+    if not Path(path).is_dir():
+        mkdir(path)
+
+    browser=Browser(path)
+    browser.start()
